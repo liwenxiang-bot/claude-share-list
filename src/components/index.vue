@@ -179,7 +179,7 @@ export default {
                   .replace("|", "-")
                   .replace("|", "-")
                   .replace("PLUS", "Pro")
-                  .replace("3.5", "普通")
+                  .replace("3.7", "Free")
                   .replace("green", "#f9bd5f")
                   .replace("yellow", "#f9bd5f")
                   .replace("red", "#f65e5d")

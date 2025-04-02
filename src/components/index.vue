@@ -1,5 +1,6 @@
 <template>
   <n-global-style />
+  <!-- 恢复原始公告样式 -->
   <n-card class="notice" size="small" :style="theme()">
     <n-switch
       :default-value="isDarkTheme"
@@ -93,9 +94,21 @@ import { defineComponent, ref, onMounted, onBeforeUnmount } from "vue";
 import axios from "axios";
 import { useLoadingBar } from "naive-ui";
 import { Sparkles, SunnySharp } from "@vicons/ionicons5";
-import { throttle } from "lodash-es"; // 使用ES模块版本
 
 const isDev = import.meta.env.MODE === "development";
+
+// 自定义函数替代lodash的throttle
+function throttle(fn, delay) {
+  let lastCall = 0;
+  return function (...args) {
+    const now = Date.now();
+    if (now - lastCall < delay) {
+      return;
+    }
+    lastCall = now;
+    return fn.apply(this, args);
+  };
+}
 
 function uniqueArrayObjects(arr) {
   const jsonObjectSet = new Set();
@@ -132,7 +145,7 @@ export default defineComponent({
     const loadingBar = ref(null);
     const statusCache = ref({}); // 状态缓存
 
-    // 数据获取函数
+    // 数据获取函数 - 修复版本
     const fetchData = async () => {
       if (!hasMoreData.value || isLoading.value) return;
 
@@ -143,11 +156,21 @@ export default defineComponent({
 
       isLoading.value = true;
 
+      // 设置全局请求超时，确保即使请求挂起也会结束加载状态
+      const globalTimeoutId = setTimeout(() => {
+        isLoading.value = false;
+        loadingBar.value.error();
+        console.error("请求超时，自动结束加载状态");
+      }, 10000); // 10秒全局超时
+
       try {
         const response = await axios.post(isDev ? "/api/carpage" : "/carpage", {
           page: page.value,
           size: minPage.value,
         });
+
+        // 清除全局超时
+        clearTimeout(globalTimeoutId);
 
         if (!response.data.data.list || response.data.data.list.length === 0) {
           hasMoreData.value = false;
@@ -175,12 +198,38 @@ export default defineComponent({
           ...preprocessedList,
         ]);
 
-        // 快速批量更新状态 - 使用Promise.all并行请求
-        const updatePromises = preprocessedList.map((item) =>
-          updateSingleItemStatus(item)
-        );
+        // 设置状态更新超时 - 确保即使API请求卡住，卡片也会从"加载中"状态中恢复
+        const updateTimeoutIds = [];
+
+        // 异步更新每个卡片状态
+        const updatePromises = preprocessedList.map((item, index) => {
+          // 为每个卡片设置单独的更新超时
+          const timeoutPromise = new Promise((resolve) => {
+            const timeoutId = setTimeout(() => {
+              updateItemInList(item.carID, {
+                loading: false,
+                message: "状态更新超时",
+              });
+              resolve();
+            }, 5000); // 5秒后强制更新状态
+            updateTimeoutIds.push(timeoutId);
+          });
+
+          // 正常的状态更新Promise
+          const updatePromise = updateSingleItemStatus(item).then(() => {
+            // 成功更新后清除对应的超时
+            clearTimeout(updateTimeoutIds[index]);
+          });
+
+          // 返回race，哪个先完成就使用哪个结果
+          return Promise.race([updatePromise, timeoutPromise]);
+        });
+
         await Promise.all(updatePromises);
       } catch (error) {
+        // 清除全局超时
+        clearTimeout(globalTimeoutId);
+
         console.error("请求错误:", error);
         loadingBar.value.error();
       } finally {
@@ -189,7 +238,7 @@ export default defineComponent({
       }
     };
 
-    // 更新单个项目的状态 - 设置超时以加快响应速度
+    // 更新单个项目的状态 - 修复版本
     const updateSingleItemStatus = async (item) => {
       try {
         const baseUrl = isDev ? "/api" : "";
@@ -212,26 +261,28 @@ export default defineComponent({
         // 设置请求超时 - 最多等待2秒
         const timeout = 2000;
 
-        // 创建带超时的fetch函数
-        const fetchWithTimeout = (url, options = {}) => {
-          return Promise.race([
-            fetch(url, options),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error("Request timed out")), timeout)
-            ),
-          ]);
-        };
+        // 创建一个真正的超时处理，即使Promise.race没有正确处理也会触发
+        const timeoutId = setTimeout(() => {
+          // 直接更新状态为"请求超时"并结束加载状态
+          updateItemInList(item.carID, {
+            loading: false,
+            message: "请求超时",
+          });
+        }, timeout);
 
-        // 并行请求endpoint和status，加上超时控制
         try {
+          // 并行请求endpoint和status
           const [endpointData, statusData] = await Promise.all([
-            fetchWithTimeout(`${baseUrl}/endpoint?carid=${carname}`)
+            fetch(`${baseUrl}/endpoint?carid=${carname}`)
               .then((r) => r.json())
               .catch(() => ({})),
-            fetchWithTimeout(`${baseUrl}/status?carid=${carname}`)
+            fetch(`${baseUrl}/status?carid=${carname}`)
               .then((r) => r.json())
               .catch(() => ({})),
           ]);
+
+          // 清除超时计时器
+          clearTimeout(timeoutId);
 
           // 处理数据
           const processedEndpointData = {};
@@ -255,6 +306,11 @@ export default defineComponent({
             loading: false, // 加载完成
           };
 
+          // 如果message为空或未定义，添加默认消息
+          if (!updatedData.message) {
+            updatedData.message = "状态正常";
+          }
+
           // 更新缓存
           statusCache.value[cacheKey] = {
             data: updatedData,
@@ -264,19 +320,22 @@ export default defineComponent({
           // 更新列表中的项目
           updateItemInList(item.carID, updatedData);
         } catch (error) {
-          console.error(`Request timeout or error for ${item.carID}:`, error);
-          // 如果超时，仍然更新状态以移除加载中
+          // 清除超时计时器
+          clearTimeout(timeoutId);
+
+          console.error(`Request error for ${item.carID}:`, error);
+          // 如果请求出错，更新状态
           updateItemInList(item.carID, {
             loading: false,
-            message: "数据请求超时",
+            message: "请求失败",
           });
         }
       } catch (error) {
-        console.error(`Error updating item ${item.carID}:`, error);
+        console.error(`General error updating item ${item.carID}:`, error);
         // 即使出错也要移除加载状态
         updateItemInList(item.carID, {
           loading: false,
-          message: "数据获取失败",
+          message: "更新失败",
         });
       }
     };
@@ -322,7 +381,7 @@ export default defineComponent({
       }/auth/login?carid=${encodeURI(carID)}`;
     };
 
-    // 滚动事件处理（使用节流）
+    // 滚动事件处理（使用自定义节流函数）
     const handleScroll = () => {
       const scrollPosition = window.scrollY + window.innerHeight;
       const documentHeight = document.documentElement.scrollHeight;
@@ -336,6 +395,7 @@ export default defineComponent({
       }
     };
 
+    // 使用自定义throttle函数
     const throttledHandleScroll = throttle(handleScroll, 200);
 
     // 页面可见性变化处理 - 当页面重新可见时更新数据
@@ -343,7 +403,12 @@ export default defineComponent({
       if (!document.hidden && itemslist.value.length > 0) {
         // 页面变为可见时刷新前10个卡片数据
         const itemsToRefresh = itemslist.value.slice(0, 10);
-        itemsToRefresh.forEach((item) => updateSingleItemStatus(item));
+        itemsToRefresh.forEach((item) => {
+          // 只对非加载中的卡片进行更新，避免重置已经在加载的卡片
+          if (!item.loading) {
+            updateSingleItemStatus(item);
+          }
+        });
       }
     };
 
@@ -441,6 +506,7 @@ export default defineComponent({
   font-weight: 600;
 }
 
+/* 恢复原始公告样式 */
 .notice {
   max-width: 100%;
   color: var(--n-title-text-color);
@@ -551,7 +617,7 @@ export default defineComponent({
 }
 
 .skeleton-progress {
-  height: 14px;
+  height: 30px;
   width: 100%;
   background: #e0e0e0;
   border-radius: 30px;

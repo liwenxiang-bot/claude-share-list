@@ -617,7 +617,7 @@ export default defineComponent({
 }
 
 .skeleton-progress {
-  height: 30px;
+  height: 14px;
   width: 100%;
   background: #e0e0e0;
   border-radius: 30px;

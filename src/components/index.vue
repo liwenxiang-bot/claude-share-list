@@ -42,7 +42,7 @@
       <!-- 真实内容 -->
       <n-card v-else size="small" @click="redirectTo(item.carID)">
         <div class="box">
-          <div class="type plus-badge" :style="{ background: item.labelColor }">
+          <div class="type" :style="{ background: item.labelColor }">
             {{ item.label != "" ? item.label : "NO" }}
           </div>
 
@@ -360,6 +360,9 @@ export default defineComponent({
         .replace("|", "-")
         .replace("PLUS", "Pro")
         .replace("3.7", "Free")
+        .replace("free", "Free")
+        .replace("pro", "Pro")
+        .replace("max", "Max")
         .replace("green", "#f9bd5f")
         .replace("yellow", "#f9bd5f")
         .replace("red", "#f65e5d")

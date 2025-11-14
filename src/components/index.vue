@@ -381,7 +381,7 @@ export default defineComponent({
     const redirectTo = (carID) => {
       window.location.href = `${
         window.location.origin
-      }/auth/login?carid=${encodeURI(carID)}`;
+      }/login?carid=${encodeURI(carID)}`;
     };
 
     // 滚动事件处理（使用自定义节流函数）

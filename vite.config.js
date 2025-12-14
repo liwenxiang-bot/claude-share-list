@@ -16,7 +16,7 @@ export default defineConfig({
     proxy: {
       '/api': {
         // 替换成你的share域名
-        target: 'https://c.9e.lv',
+        target: 'https://gemini.9e.lv',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },

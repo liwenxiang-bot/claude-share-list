@@ -9,7 +9,7 @@
 
 ## 一键快速替换前端页面：
 ```shell
-curl -sSfL https://raw.githubusercontent.com/liwenxiang-bot/claude-share-list/master/quick-install/quick-list.sh | bash
+curl -sSfL https://raw.githubusercontent.com/liwenxiang-bot/gemini-share-list/master/quick-install/quick-list.sh | bash
 ```
 
 ## 公告配置
